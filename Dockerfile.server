@@ -1,0 +1,11 @@
+FROM golang:1.16-alpine as builder
+WORKDIR /app
+
+COPY . ./
+RUN go mod download
+RUN go build -o /app/bin/server server/server.go
+
+FROM alpine:3
+COPY --from=builder /app/bin/server /bin/word-of-wisdom-server
+EXPOSE 8888
+CMD ["/bin/word-of-wisdom-server"]

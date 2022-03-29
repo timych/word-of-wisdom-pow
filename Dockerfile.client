@@ -1,0 +1,10 @@
+FROM golang:1.16-alpine as builder
+WORKDIR /app
+
+COPY . ./
+RUN go mod download
+RUN go build -o /app/bin/client client/client.go
+
+FROM alpine:3
+COPY --from=builder /app/bin/client /bin/word-of-wisdom-client
+CMD ["/bin/word-of-wisdom-client", "-addr=wow-server:8888"]
