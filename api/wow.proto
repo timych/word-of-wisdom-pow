@@ -1,0 +1,20 @@
+syntax = "proto3";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+option go_package = "github.com/timych/word-of-wisdom-pow/api";
+package wow;
+
+service WordOfWisdom {
+    rpc GetChallenge(google.protobuf.Empty) returns (Challenge) {}
+    rpc InspireMe(ChallengeSolution) returns (google.protobuf.StringValue) {}
+}
+
+message Challenge {
+    string token = 1;
+    uint32 complexity = 2; 
+}
+
+message ChallengeSolution {
+    string token = 1;
+    int64 solution = 2;
+}
