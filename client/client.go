@@ -2,52 +2,64 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	"net"
 	"time"
 
-	"github.com/timych/word-of-wisdom-pow/api"
 	"github.com/timych/word-of-wisdom-pow/pow"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
-	addr = flag.String("addr", "localhost:8888", "the address to connect to")
+	addr    = flag.String("addr", "localhost:8888", "the address to connect to")
+	timeout = flag.Int("timeout", 1000, "Solution timeout in milliseconds")
 )
 
 func main() {
 	flag.Parse()
-	conn, err := grpc.Dial(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := net.Dial("tcp", *addr)
 	if err != nil {
 		log.Fatalf("Connection error: %v", err)
+		return
 	}
 	defer conn.Close()
-	c := api.NewWordOfWisdomClient(conn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := c.GetChallenge(ctx, &emptypb.Empty{})
+	// Getting challenge
+	buf := make([]byte, 17)
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, err = io.ReadFull(conn, buf)
 	if err != nil {
-		log.Fatalf("GetChallenge error: %v", err)
+		log.Fatalf("Getting challenge error: %v", err)
 	}
+	seed := buf[:len(buf)-1]
+	complexity := uint8(buf[len(buf)-1])
+	log.Printf("Challenge recived (seed=%x, complexity=%v)", seed, complexity)
 
-	log.Printf("Challenge recived (token=%v, complexity=%v)", r.GetToken(), r.GetComplexity())
+	// PoW solving
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Millisecond)
+	defer cancel()
 	start := time.Now()
-	s, err := pow.Compute(ctx, r.GetToken(), r.GetComplexity())
+	s, err := pow.Compute(ctx, seed, complexity)
 	if err != nil {
 		log.Fatalf("PoW compute error: %v", err)
 	}
+	log.Printf("PoW solution found: %d (%v)", binary.LittleEndian.Uint64(s), time.Since(start))
 
-	log.Printf("PoW solution found: %v (%v)", s, time.Since(start))
-	w, err := c.InspireMe(ctx, &api.ChallengeSolution{Token: r.GetToken(), Solution: s})
+	// Solution sending
+	_, err = conn.Write(s)
 	if err != nil {
-		log.Fatalf("InspireMe failed: %v", err)
+		log.Fatalf("Solution sending error: %v", err)
 	}
 
-	log.Printf("Word of Wisdom: %v", w.Value)
-
-	// fmt.Print("Press 'Enter' to exit")
-	// bufio.NewReader(os.Stdin).ReadBytes('\n')
+	// Wisdom reading
+	buf = make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, err = conn.Read(buf)
+	if err != nil {
+		log.Fatalf("Wisdom reading error: %v", err)
+	}
+	fmt.Printf("\n%s\n", buf)
 }

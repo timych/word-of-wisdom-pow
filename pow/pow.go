@@ -3,72 +3,62 @@ package pow
 import (
 	"context"
 	"crypto/sha1"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
-	"io"
-	"strconv"
+	"encoding/binary"
+	"math/bits"
 
 	"github.com/google/uuid"
 )
 
-const (
-	zero rune = 48
-)
-
-func GenerateChallengeToken() string {
-	t := uuid.NewString()
-	activeTokens.Append(t)
+func NewChallenge() []byte {
+	t, _ := uuid.New().MarshalBinary()
 	return t
 }
 
-func Compute(ctx context.Context, token string, complexity uint32) (int64, error) {
-	var maxIterations int64 = 2 << (complexity * 4) // twice as many as the average required
-	var counter int64
-	for !checkSolution(token, complexity, counter) {
-		counter++
-		if counter >= maxIterations {
-			return 0, fmt.Errorf("exceeded 2*2^%v iterations, failed to find solution", complexity*4)
+func Compute(ctx context.Context, seed []byte, complexity uint8) ([]byte, error) {
+	var counter uint64
+	solution := make([]byte, 8)
+
+	for {
+		binary.LittleEndian.PutUint64(solution, counter)
+		if Verify(seed, complexity, solution) {
+			break
 		}
+
+		counter++
 
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return nil, ctx.Err()
 		default:
 			continue
 		}
 	}
-	return counter, nil
+
+	return solution, nil
 }
 
-func Verify(token string, complexity uint32, solution int64) bool {
-	if checkSolution(token, complexity, solution) {
-		if activeTokens.Delete(token) {
-			return true
-		}
-	}
-	return false
-}
+func Verify(seed []byte, complexity uint8, solution []byte) bool {
+	hash := shaHash(append(seed, solution...))
 
-func checkSolution(token string, complexity uint32, solution int64) bool {
-	hash := shaHash(token + ":" + base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(solution, 10))))
-
-	if len(hash) < int(complexity) {
+	if len(hash)*8 < int(complexity) {
 		return false
 	}
-	for _, val := range hash[:complexity] {
-		if val != zero {
+
+	zeroBytesWanted := complexity / 8
+	zeroBitsWanted := int(complexity % 8)
+	for _, b := range hash[:zeroBytesWanted] {
+		if b != 0 {
 			return false
 		}
 	}
-	return true
+	return zeroBitsWanted == 0 || bits.LeadingZeros8(hash[zeroBytesWanted]) >= zeroBitsWanted
 }
 
-func shaHash(s string) string {
+func shaHash(in []byte) []byte {
 	hash := sha1.New()
-	_, err := io.WriteString(hash, s)
+	_, err := hash.Write(in)
 	if err != nil {
-		return ""
+		return []byte{}
 	}
-	return hex.EncodeToString(hash.Sum(nil))
+	return hash.Sum(nil)
 }
