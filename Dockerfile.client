@@ -7,4 +7,4 @@ RUN go build -o /app/bin/client client/client.go
 
 FROM alpine:3
 COPY --from=builder /app/bin/client /bin/word-of-wisdom-client
-CMD ["/bin/word-of-wisdom-client", "-addr=wow-server:8888"]
+CMD ["/bin/word-of-wisdom-client", "-addr=server:8888"]
